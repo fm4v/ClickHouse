@@ -1,0 +1,11 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <allow_experimental_refreshable_materialized_view>1</allow_experimental_refreshable_materialized_view>
+<!--            <allow_experimental_variant_type>1</allow_experimental_variant_type>-->
+            <allow_experimental_dynamic_type>1</allow_experimental_dynamic_type>
+            <session_timezone>Etc/UTC</session_timezone>
+            <max_partitions_per_insert_block>10000</max_partitions_per_insert_block>
+        </default>
+    </profiles>
+</clickhouse>
