@@ -1242,7 +1242,7 @@ CI_CONFIG = CIConfig(
             job_config=JobConfig(num_batches=5, **stateless_test_common_params),  # type: ignore
         ),
         JobNames.STATELESS_TEST_RELEASE: TestConfig(
-            Build.PACKAGE_RELEASE, job_config=JobConfig(**stateless_test_common_params)  # type: ignore
+            Build.PACKAGE_RELEASE, job_config=JobConfig(num_batches=2, **stateless_test_common_params)  # type: ignore
         ),
         JobNames.STATELESS_TEST_RELEASE_COVERAGE: TestConfig(
             Build.PACKAGE_RELEASE_COVERAGE,
@@ -1253,7 +1253,7 @@ CI_CONFIG = CIConfig(
         ),
         JobNames.STATELESS_TEST_OLD_ANALYZER_S3_REPLICATED_RELEASE: TestConfig(
             Build.PACKAGE_RELEASE,
-            job_config=JobConfig(num_batches=4, **stateless_test_common_params),  # type: ignore
+            job_config=JobConfig(num_batches=3, **stateless_test_common_params),  # type: ignore
         ),
         JobNames.STATELESS_TEST_S3_DEBUG: TestConfig(
             Build.PACKAGE_DEBUG,
