@@ -2388,7 +2388,7 @@ def extract_key(key: str) -> str:
     )[1]
 
 
-def do_run_tests(jobs, test_suite: TestSuite, parallel):
+def do_run_tests(jobs, test_suite: TestSuite):
     if jobs > 1 and len(test_suite.parallel_tests) > 0:
         print(
             "Found",
@@ -2399,7 +2399,6 @@ def do_run_tests(jobs, test_suite: TestSuite, parallel):
         )
 
         def run_tests_in_parallel(tests, jobs):
-            run_n, run_total = parallel.split("/")
             tests_n = len(test_suite.parallel_tests)
             jobs = min(jobs, tests_n)
             batch_size = max(1, len(tests) // jobs)
@@ -2804,7 +2803,7 @@ def main(args):
 
         test_suite.cloud_skip_list = cloud_skip_list
         test_suite.private_skip_list = private_skip_list
-        total_tests_run += do_run_tests(args.jobs, test_suite, args.parallel)
+        total_tests_run += do_run_tests(args.jobs, test_suite)
 
     if server_died.is_set():
         exit_code.value = 1
