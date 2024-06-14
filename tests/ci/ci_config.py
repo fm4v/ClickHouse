@@ -1227,11 +1227,11 @@ CI_CONFIG = CIConfig(
         ),
         JobNames.STATELESS_TEST_TSAN: TestConfig(
             Build.PACKAGE_TSAN,
-            job_config=JobConfig(num_batches=5, **stateless_test_common_params),  # type: ignore
+            job_config=JobConfig(num_batches=3, **stateless_test_common_params),  # type: ignore
         ),
         JobNames.STATELESS_TEST_MSAN: TestConfig(
             Build.PACKAGE_MSAN,
-            job_config=JobConfig(num_batches=6, **stateless_test_common_params),  # type: ignore
+            job_config=JobConfig(num_batches=4, **stateless_test_common_params),  # type: ignore
         ),
         JobNames.STATELESS_TEST_UBSAN: TestConfig(
             Build.PACKAGE_UBSAN,
@@ -1265,7 +1265,7 @@ CI_CONFIG = CIConfig(
         ),
         JobNames.STATELESS_TEST_S3_TSAN: TestConfig(
             Build.PACKAGE_TSAN,
-            job_config=JobConfig(num_batches=5, **stateless_test_common_params),  # type: ignore
+            job_config=JobConfig(num_batches=3, **stateless_test_common_params),  # type: ignore
         ),
         JobNames.STRESS_TEST_DEBUG: TestConfig(
             Build.PACKAGE_DEBUG, job_config=JobConfig(**stress_test_common_params)  # type: ignore
