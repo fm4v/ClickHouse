@@ -85,8 +85,6 @@ function insert()
     done
 }
 
-
-
 TIMEOUT=30
 
 create_db $TIMEOUT &
