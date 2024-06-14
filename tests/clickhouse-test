@@ -2439,11 +2439,14 @@ def do_run_tests(jobs, test_suite: TestSuite):
             run_tests_in_parallel(test_suite.parallel_tests, jobs, test_suite)
 
             # Check: Run sequential tests in 2 threads
-            print("Run sequential tests")
-            run_tests_in_parallel(test_suite.sequential_tests, 2, test_suite)
+            # print("Run sequential tests")
+            # run_tests_in_parallel(test_suite.sequential_tests, 2, test_suite)
         except Full:
             pass
 
+        run_tests_array(
+            (test_suite.sequential_tests, len(test_suite.sequential_tests), test_suite)
+        )
         return len(test_suite.sequential_tests) + len(test_suite.parallel_tests)
     else:
         num_tests = len(test_suite.all_tests)
