@@ -2398,54 +2398,52 @@ def do_run_tests(jobs, test_suite: TestSuite, parallel):
             len(test_suite.sequential_tests),
             "sequential tests",
         )
-        run_n, run_total = parallel.split("/")
-        run_n = float(run_n)
-        run_total = float(run_total)
-        tests_n = len(test_suite.parallel_tests)
-        run_total = min(run_total, tests_n)
 
-        jobs = min(jobs, tests_n)
-        run_total = max(jobs, run_total)
+        def run_tests_in_parallel(tests, jobs):
+            run_n, run_total = parallel.split("/")
+            tests_n = len(test_suite.parallel_tests)
+            jobs = min(jobs, tests_n)
+            batch_size = max(1, len(tests) // jobs)
+            parallel_tests_array = []
+            for _ in range(jobs):
+                parallel_tests_array.append((None, batch_size, test_suite))
 
-        batch_size = max(1, len(test_suite.parallel_tests) // jobs)
-        parallel_tests_array = []
-        for _ in range(jobs):
-            parallel_tests_array.append((None, batch_size, test_suite))
+            # If we don't do random shuffling then there will be always
+            # nearly the same groups of test suites running concurrently.
+            # Thus, if there is a test within group which appears to be broken
+            # then it will affect all other tests in a non-random form.
+            # So each time a bad test fails - other tests from the group will also fail
+            # and this process will be more or less stable.
+            # It makes it more difficult to detect real flaky tests,
+            # because the distribution and the amount
+            # of failures will be nearly the same for all tests from the group.
+            random.shuffle(tests)
 
-        # If we don't do random shuffling then there will be always
-        # nearly the same groups of test suites running concurrently.
-        # Thus, if there is a test within group which appears to be broken
-        # then it will affect all other tests in a non-random form.
-        # So each time a bad test fails - other tests from the group will also fail
-        # and this process will be more or less stable.
-        # It makes it more difficult to detect real flaky tests,
-        # because the distribution and the amount
-        # of failures will be nearly the same for all tests from the group.
-        random.shuffle(test_suite.parallel_tests)
+            try:
+                with closing(multiprocessing.Pool(processes=jobs)) as pool:
+                    pool.map_async(run_tests_array, parallel_tests_array)
 
-        try:
-            with closing(multiprocessing.Pool(processes=jobs)) as pool:
-                pool.map_async(run_tests_array, parallel_tests_array)
+                    for suit in tests:
+                        queue.put(suit, timeout=args.timeout * 1.1)
 
-                for suit in test_suite.parallel_tests:
-                    queue.put(suit, timeout=args.timeout * 1.1)
+                    for _ in range(jobs):
+                        queue.put(None, timeout=args.timeout * 1.1)
 
-                for _ in range(jobs):
-                    queue.put(None, timeout=args.timeout * 1.1)
-
+                    queue.close()
+            except Full:
+                print(
+                    "Couldn't put test to the queue within timeout. Server probably hung."
+                )
+                print_stacktraces()
                 queue.close()
-        except Full:
-            print(
-                "Couldn't put test to the queue within timeout. Server probably hung."
-            )
-            print_stacktraces()
-            queue.close()
 
-        pool.join()
+            pool.join()
 
-        run_tests_array(
-            (test_suite.sequential_tests, len(test_suite.sequential_tests), test_suite)
-        )
+        run_tests_in_parallel(test_suite.parallel_tests, jobs)
+
+        # Check: Run sequential tests in 2 threads
+        run_tests_in_parallel(test_suite.sequential_tests, 2)
+
         return len(test_suite.sequential_tests) + len(test_suite.parallel_tests)
     else:
         num_tests = len(test_suite.all_tests)
