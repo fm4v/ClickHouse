@@ -1462,7 +1462,7 @@ class TestCase:
         description_full = messages[result.status]
         description_full += self.print_test_time(result.total_time)
         if result.reason is not None:
-            description_full += "\nReason: " + result.reason.value
+            description_full += f"\nReason: {result.reason.value} "
 
         description_full += result.description
 
@@ -2117,7 +2117,7 @@ def run_tests_array(all_tests_with_params: Tuple[List[str], int, TestSuite]):
     if num_tests > 0:
         about = "about " if is_concurrent else ""
         proc_name = multiprocessing.current_process().name
-        print(f"\nRunning {about}{num_tests} {test_suite.suite} tests ({proc_name}).\n")
+        print(f"Running {about}{num_tests} {test_suite.suite} tests ({proc_name}).")
 
     while True:
         if is_concurrent:
@@ -2388,6 +2388,43 @@ def extract_key(key: str) -> str:
     )[1]
 
 
+def run_tests_in_parallel(tests, jobs, test_suite):
+    tests_n = len(tests)
+    jobs = min(jobs, tests_n)
+    batch_size = max(1, len(tests) // jobs)
+    parallel_tests_array = []
+    for _ in range(jobs):
+        parallel_tests_array.append((None, batch_size, test_suite))
+
+    # If we don't do random shuffling then there will be always
+    # nearly the same groups of test suites running concurrently.
+    # Thus, if there is a test within group which appears to be broken
+    # then it will affect all other tests in a non-random form.
+    # So each time a bad test fails - other tests from the group will also fail
+    # and this process will be more or less stable.
+    # It makes it more difficult to detect real flaky tests,
+    # because the distribution and the amount
+    # of failures will be nearly the same for all tests from the group.
+    random.shuffle(tests)
+
+    try:
+        with closing(multiprocessing.Pool(processes=jobs)) as pool:
+            pool.map_async(run_tests_array, parallel_tests_array)
+
+            for suit in tests:
+                queue.put(suit, timeout=args.timeout * 1.1)
+
+            for _ in range(jobs):
+                queue.put(None, timeout=args.timeout * 1.1)
+
+    except Full:
+        print("Couldn't put test to the queue within timeout. Server probably hung.")
+        print_stacktraces()
+        raise
+
+    pool.join()
+
+
 def do_run_tests(jobs, test_suite: TestSuite):
     if jobs > 1 and len(test_suite.parallel_tests) > 0:
         print(
@@ -2398,49 +2435,14 @@ def do_run_tests(jobs, test_suite: TestSuite):
             "sequential tests",
         )
 
-        def run_tests_in_parallel(tests, jobs):
-            tests_n = len(test_suite.parallel_tests)
-            jobs = min(jobs, tests_n)
-            batch_size = max(1, len(tests) // jobs)
-            parallel_tests_array = []
-            for _ in range(jobs):
-                parallel_tests_array.append((None, batch_size, test_suite))
+        try:
+            run_tests_in_parallel(test_suite.parallel_tests, jobs, test_suite)
 
-            # If we don't do random shuffling then there will be always
-            # nearly the same groups of test suites running concurrently.
-            # Thus, if there is a test within group which appears to be broken
-            # then it will affect all other tests in a non-random form.
-            # So each time a bad test fails - other tests from the group will also fail
-            # and this process will be more or less stable.
-            # It makes it more difficult to detect real flaky tests,
-            # because the distribution and the amount
-            # of failures will be nearly the same for all tests from the group.
-            random.shuffle(tests)
-
-            try:
-                with closing(multiprocessing.Pool(processes=jobs)) as pool:
-                    pool.map_async(run_tests_array, parallel_tests_array)
-
-                    for suit in tests:
-                        queue.put(suit, timeout=args.timeout * 1.1)
-
-                    for _ in range(jobs):
-                        queue.put(None, timeout=args.timeout * 1.1)
-
-                    queue.close()
-            except Full:
-                print(
-                    "Couldn't put test to the queue within timeout. Server probably hung."
-                )
-                print_stacktraces()
-                queue.close()
-
-            pool.join()
-
-        run_tests_in_parallel(test_suite.parallel_tests, jobs)
-
-        # Check: Run sequential tests in 2 threads
-        run_tests_in_parallel(test_suite.sequential_tests, 2)
+            # Check: Run sequential tests in 2 threads
+            print("Run sequential tests")
+            run_tests_in_parallel(test_suite.sequential_tests, 2, test_suite)
+        except Full:
+            pass
 
         return len(test_suite.sequential_tests) + len(test_suite.parallel_tests)
     else:
