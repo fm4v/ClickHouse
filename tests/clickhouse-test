@@ -2066,13 +2066,8 @@ multiprocessing_manager = None
 restarted_tests = None
 
 
-def run_tests_array(all_tests_with_params: Tuple[List[str], int, TestSuite, bool]):
-    (
-        all_tests,
-        num_tests,
-        test_suite,
-        is_concurrent,
-    ) = all_tests_with_params
+def run_tests_array(all_tests_with_params: Tuple[List[str], int, TestSuite]):
+    all_tests, num_tests, test_suite = all_tests_with_params
     global stop_time
     global exit_code
     global server_died
@@ -2114,6 +2109,8 @@ def run_tests_array(all_tests_with_params: Tuple[List[str], int, TestSuite, bool
     failures_total = 0
     failures_chain = 0
     start_time = datetime.now()
+
+    is_concurrent = multiprocessing.current_process().name != "MainProcess"
 
     client_options = get_additional_client_options(args)
 
@@ -2391,6 +2388,43 @@ def extract_key(key: str) -> str:
     )[1]
 
 
+def run_tests_in_parallel(tests, jobs, test_suite):
+    tests_n = len(tests)
+    jobs = min(jobs, tests_n)
+    batch_size = max(1, len(tests) // jobs)
+    parallel_tests_array = []
+    for _ in range(jobs):
+        parallel_tests_array.append((None, batch_size, test_suite))
+
+    # If we don't do random shuffling then there will be always
+    # nearly the same groups of test suites running concurrently.
+    # Thus, if there is a test within group which appears to be broken
+    # then it will affect all other tests in a non-random form.
+    # So each time a bad test fails - other tests from the group will also fail
+    # and this process will be more or less stable.
+    # It makes it more difficult to detect real flaky tests,
+    # because the distribution and the amount
+    # of failures will be nearly the same for all tests from the group.
+    random.shuffle(tests)
+
+    try:
+        with closing(multiprocessing.Pool(processes=jobs)) as pool:
+            pool.map_async(run_tests_array, parallel_tests_array)
+
+            for suit in tests:
+                queue.put(suit, timeout=args.timeout * 1.1)
+
+            for _ in range(jobs):
+                queue.put(None, timeout=args.timeout * 1.1)
+
+    except Full:
+        print("Couldn't put test to the queue within timeout. Server probably hung.")
+        print_stacktraces()
+        raise
+
+    pool.join()
+
+
 def do_run_tests(jobs, test_suite: TestSuite):
     if jobs > 1 and len(test_suite.parallel_tests) > 0:
         print(
@@ -2400,107 +2434,19 @@ def do_run_tests(jobs, test_suite: TestSuite):
             len(test_suite.sequential_tests),
             "sequential tests",
         )
-        tests_n = len(test_suite.parallel_tests)
-        jobs = min(jobs, tests_n)
-        batch_size = max(1, len(test_suite.parallel_tests) // jobs)
-        parallel_tests_array = []
-        for _ in range(jobs):
-            parallel_tests_array.append((None, batch_size, test_suite, True))
-
-        # If we don't do random shuffling then there will be always
-        # nearly the same groups of test suites running concurrently.
-        # Thus, if there is a test within group which appears to be broken
-        # then it will affect all other tests in a non-random form.
-        # So each time a bad test fails - other tests from the group will also fail
-        # and this process will be more or less stable.
-        # It makes it more difficult to detect real flaky tests,
-        # because the distribution and the amount
-        # of failures will be nearly the same for all tests from the group.
-        random.shuffle(test_suite.parallel_tests)
 
         try:
-            with closing(multiprocessing.Pool(processes=jobs)) as pool:
-                pool.map_async(run_tests_array, parallel_tests_array)
-
-                for suit in test_suite.parallel_tests:
-                    queue.put(suit, timeout=args.timeout * 1.1)
-
-                for _ in range(jobs):
-                    queue.put(None, timeout=args.timeout * 1.1)
-
+            run_tests_in_parallel(test_suite.parallel_tests, jobs, test_suite)
         except Full:
-            print(
-                "Couldn't put test to the queue within timeout. Server probably hung."
-            )
-            print_stacktraces()
+            pass
 
-        if args.run_sequential_tests_in_parallel:
-            # Run parallel tests and sequential tests at the same time
-            # Sequential tests will use different ClickHouse instance
-
-            # Create a new process to run these tests
-            # In this process we can safely override values in `args` and `os.environ`
-
-            def override_envs(*args_, **kwargs):
-                global args
-                args.client += " --port 39000"
-                args.http_port = 38123
-                args.https_port = 38443
-
-                os.environ["CLICKHOUSE_CONFIG"] = "/etc/clickhouse-server3/config.xml"
-                os.environ["CLICKHOUSE_PORT_TCP"] = "39000"
-                os.environ["CLICKHOUSE_PORT_TCP_SECURE"] = "39440"
-                os.environ["CLICKHOUSE_PORT_TCP_WITH_PROXY"] = "39010"
-                os.environ["CLICKHOUSE_PORT_HTTP"] = "38123"
-                os.environ["CLICKHOUSE_PORT_HTTPS"] = "38443"
-                os.environ["CLICKHOUSE_PORT_INTERSERVER"] = "39009"
-                os.environ["CLICKHOUSE_PORT_KEEPER"] = "39181"
-                os.environ["CLICKHOUSE_PORT_PROMTHEUS_PORT"] = "39988"
-                os.environ["CLICKHOUSE_PORT_MYSQL"] = "39004"
-                os.environ["CLICKHOUSE_PORT_POSTGRESQL"] = "39005"
-
-                run_tests_array(*args_, **kwargs)
-
-            process = multiprocessing.Process(
-                target=override_envs,
-                args=(
-                    (
-                        test_suite.sequential_tests,
-                        len(test_suite.sequential_tests),
-                        test_suite,
-                        False,
-                    ),
-                ),
-            )
-            process.start()
-            print("Run sequential tests")
-            process.join()
-            print("Sequential tests done")
-
-            pool.join()
-
-        if not args.run_sequential_tests_in_parallel:
-            pool.join()
-            run_tests_array(
-                (
-                    test_suite.sequential_tests,
-                    len(test_suite.sequential_tests),
-                    test_suite,
-                    False,
-                )
-            )
-
+        run_tests_array(
+            (test_suite.sequential_tests, len(test_suite.sequential_tests), test_suite)
+        )
         return len(test_suite.sequential_tests) + len(test_suite.parallel_tests)
     else:
         num_tests = len(test_suite.all_tests)
-        run_tests_array(
-            (
-                test_suite.all_tests,
-                num_tests,
-                test_suite,
-                False,
-            )
-        )
+        run_tests_array((test_suite.all_tests, num_tests, test_suite))
         return num_tests
 
 
@@ -3310,15 +3256,6 @@ def parse_args():
         action="store_true",
         default=False,
         help="Replace ordinary MergeTree engine with SharedMergeTree",
-    )
-
-    parser.add_argument(
-        "--run-sequential-tests-in-parallel",
-        action="store_true",
-        default=False,
-        help="If `true`, tests with the tag `no-parallel` will run on a "
-        "separate ClickHouse instance in parallel with other tests. "
-        "This is used in CI to make test jobs run faster.",
     )
 
     return parser.parse_args()
