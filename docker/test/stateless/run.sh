@@ -93,36 +93,6 @@ if [ "$NUM_TRIES" -gt "1" ]; then
     mkdir -p /var/run/clickhouse-server
 fi
 
-# Run a CH instance to execute sequential tests on it in parallel with all other tests.
-mkdir -p /var/run/clickhouse-server3 /etc/clickhouse-server3 /var/lib/clickhouse3
-cp -r -L /etc/clickhouse-server/* /etc/clickhouse-server3/
-
-sudo chown clickhouse:clickhouse /var/run/clickhouse-server3 /var/lib/clickhouse3 /etc/clickhouse-server3/
-sudo chown -R clickhouse:clickhouse /etc/clickhouse-server3/*
-
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|<port>9000</port>|<port>39000</port>|g" {} \;
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|<port>9440</port>|<port>39440</port>|g" {} \;
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|<port>9988</port>|<port>39988</port>|g" {} \;
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|<port>9234</port>|<port>39234</port>|g" {} \;
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|<port>9181</port>|<port>39181</port>|g" {} \;
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|<tcp_port>9181</tcp_port>|<tcp_port>39181</tcp_port>|g" {} \;
-sudo find /etc/clickhouse-server3/ -type f -name '*.xml' -exec sed -i "s|/var/lib/clickhouse/|/var/lib/clickhouse3/|g" {} \;
-
-
-sudo -E -u clickhouse /usr/bin/clickhouse server --daemon --config /etc/clickhouse-server3/config.xml \
---pid-file /var/run/clickhouse-server3/clickhouse-server.pid \
--- --path /var/lib/clickhouse3/ --logger.stderr /var/log/clickhouse-server/stderr3.log \
---logger.log /var/log/clickhouse-server/clickhouse-server3.log --logger.errorlog /var/log/clickhouse-server/clickhouse-server3.err.log \
---tcp_port 39000 --tcp_port_secure 39440 --http_port 38123 --https_port 38443 --interserver_http_port 39009 --tcp_with_proxy_port 39010 \
---prometheus.port 39988 --keeper_server.raft_configuration.server.port 39234 --keeper_server.tcp_port 39181 \
---mysql_port 39004 --postgresql_port 39005
-
-for _ in {1..100}
-do
-    clickhouse-client --port 39000 --query "SELECT 1" && break
-    sleep 1
-done
-
 # simplest way to forward env variables to server
 sudo -E -u clickhouse /usr/bin/clickhouse-server --config /etc/clickhouse-server/config.xml --daemon --pid-file /var/run/clickhouse-server/clickhouse-server.pid
 
@@ -251,7 +221,7 @@ function run_tests()
         ADDITIONAL_OPTIONS+=('--replicated-database')
         # Too many tests fail for DatabaseReplicated in parallel.
         ADDITIONAL_OPTIONS+=('--jobs')
-        ADDITIONAL_OPTIONS+=('2')
+        ADDITIONAL_OPTIONS+=('3')
     elif [[ 1 == $(clickhouse-client --query "SELECT value LIKE '%SANITIZE_COVERAGE%' FROM system.build_options WHERE name = 'CXX_FLAGS'") ]]; then
         # Coverage on a per-test basis could only be collected sequentially.
         # Do not set the --jobs parameter.
@@ -259,7 +229,7 @@ function run_tests()
     else
         # All other configurations are OK.
         ADDITIONAL_OPTIONS+=('--jobs')
-        ADDITIONAL_OPTIONS+=('5')
+        ADDITIONAL_OPTIONS+=('6')
     fi
 
     if [[ -n "$RUN_BY_HASH_NUM" ]] && [[ -n "$RUN_BY_HASH_TOTAL" ]]; then
@@ -284,8 +254,7 @@ function run_tests()
 
     set +e
     clickhouse-test --testname --shard --zookeeper --check-zookeeper-session --hung-check --print-time \
-        --test-runs "$NUM_TRIES" "${ADDITIONAL_OPTIONS[@]}" \
-        --run-sequential-tests-in-parallel 2>&1 \
+        --test-runs "$NUM_TRIES" "${ADDITIONAL_OPTIONS[@]}" 2>&1 \
     | ts '%Y-%m-%d %H:%M:%S' \
     | tee -a test_output/test_result.txt
     set -e
